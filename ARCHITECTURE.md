@@ -1,0 +1,62 @@
+# Martigence – Dikhao aur Jano: Architecture
+
+Home services for Deoghar, Jharkhand. A customer shows a home problem (text or photo, Hindi or English). They get the likely problem, the right pro, the urgency, a safety tip and a fair price band (labour and parts shown separately). They can check a pro's quote and book on WhatsApp with the band locked.
+
+![Architecture](architecture.png)
+
+```mermaid
+flowchart LR
+  U["📱 Customer phone<br/>Hindi / English UI<br/>text or photo"] -->|HTTPS JSON<br/>photo resized to 1024px| S
+  subgraph S["Node.js + Express server (Martigence)"]
+    D["/api/diagnose"]
+    Q["/api/check-quote"]
+    M["/api/match"]
+    R["Rule engine<br/>rate card · urgency guards<br/>band clamp · fallback"]
+    MS["MatchScore rulebook<br/>skill 40 · distance 25<br/>rating 20 · fair-pricing 15<br/>(not AI)"]
+    D --> R
+    Q --> R
+    M --> MS
+  end
+  D -->|"@google/genai SDK<br/>multimodal + responseSchema"| G["✨ Google Gemini<br/>Flash model<br/>(key server-side only)"]
+  Q -->|"structured reason + questions"| G
+  G -->|structured JSON| R
+  R -->|"diagnosis · urgency · safety tip<br/>labour + parts band · verdict"| U
+  U -->|"Book on WhatsApp<br/>prefilled summary + locked band"| W["💬 WhatsApp<br/>wa.me/917250522544"]
+  W --> P["👷 Verified Martigence pro<br/>₹69 visit fee adjusted in bill<br/>quote locked before work"]
+```
+
+## Components
+| Layer | What | Where |
+|---|---|---|
+| Frontend | Mobile-first single page, Hindi/English toggle, large text, high contrast, labelled inputs, aria-live results. Photos are resized in the browser to 1024px JPEG before upload. | `app/public/index.html` |
+| API server | Node.js + Express. Gemini is called **only here**; the API key never reaches the browser. | `app/server.js` |
+| Gemini integration | Official `@google/genai` SDK. Multimodal input (photo + text). `responseSchema` gives strict JSON with enums for category, urgency, job and confidence. The system prompt holds the Deoghar rate card and urgency rules. Model chain: `gemini-3.8-flash` (thinking LOW, 16 s timeout) → `gemini-3.5-flash-lite` (11 s timeout) → rule-based fallback. `gemini-2.5-flash` returns 404 for new API keys, so newer free Flash models come first. Override with `GEMINI_MODEL=` in `.env`. | `app/server.js` |
+| Rule engine | Rate card for 18 common jobs, keyword urgency guards (sparking, gas, flooding → URGENT, whatever the model says), clamps the AI price band to within 2× of the rate card, the quote verdict, and a complete rule-based fallback. | `app/rules.js` |
+| MatchScore | Public rulebook, **not AI**: skill 40 + distance 25 + rating 20 + fair-pricing record 15. Nobody can pay to rank higher. Uses **SAMPLE pros (example data)**. | `app/rules.js` |
+| Booking | `wa.me/917250522544` with a prefilled summary: problem, pro, urgency, locked band, ₹69 visit fee and the checked quote. | frontend |
+
+## API
+- `POST /api/diagnose` `{text?, image? (dataURL/base64), mime?, lang:'en'|'hi'}` → `{source:'gemini'|'fallback', model, note, result{problem, category, job_key, urgency, urgency_reason, safety_tip, labour_min/max, parts_min/max, parts_list, pro_should_check, questions_for_customer, confidence, photo_seen, guard_triggered}}`
+- `POST /api/check-quote` `{quote, labour_min/max, parts_min/max, problem, lang}` → `{verdict: fair|slightly_high|too_high|suspiciously_low, diff, band_total, reason, questions_to_ask_pro, above_band_rule}`. The **verdict always comes from the transparent rules**. Gemini writes the reason and the questions.
+- `POST /api/match` `{category}` → top 3 sample pros with their score breakdown.
+- `GET /api/health` → whether a key is present and the last working model (never shows the key).
+
+## Trust and safety design
+- **AI proposes, rules decide.** Urgency guards can only raise urgency, never lower it. Price bands are clamped to the rate card. The quote verdict is pure arithmetic.
+- **Never a blank screen.** If there is no key, a timeout, a quota limit or a model error, the app shows a rule-based estimate with a friendly note.
+- Quote verdict thresholds: within the band = fair; up to 25% (and ≤ ₹300) over = slightly high; more = too high; below 60% of the band's minimum = suspiciously low.
+
+## Business rules in the product
+- The price band is shown before the visit. The quote is locked on WhatsApp before work starts.
+- ₹69 visit fee, adjusted in the bill.
+- Above the band, the pro must send a reason and photos. The customer can get a free second quote, or pay only the ₹69 visit fee. Overcharging leads to a warning, then a 2-week pause, then removal.
+- Commission is on labour only. Founding pros pay 0% on their first 5 jobs, then 10%.
+- Kaam ki Guarantee: if the same fault comes back within 7 days, the same pro returns free.
+
+## Config and running
+- Key: `GEMINI_API_KEY` in `/home/box/martigence-buildathon/.env` (git-ignored). **`.env` is re-read on every request**, so a new key or `GEMINI_MODEL` works without a restart.
+- `./start.sh` restarts the server on :8080 and a Cloudflare quick tunnel, then prints the public URL.
+- Logs: `server.log`, `tunnel.log`.
+
+## Next on Google Cloud (once credits are available)
+Cloud Run for the API, Firestore for job cards and real Deoghar prices (which replace the starting rate card), and the WhatsApp Business API webhook.
