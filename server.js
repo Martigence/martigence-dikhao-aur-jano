@@ -258,9 +258,16 @@ async function judgeListings(query, cands) {
   });
   return g.data.keep;
 }
-async function onlinePrices(query, refId) {
+async function onlinePrices(query, refId, alt) {
   const ref = parts.PARTS[refId];
-  return pricesearch.search(query, { judge: judgeListings, band: ref ? { low: ref.b[0], high: ref.b[2] } : null });
+  const opts = { judge: judgeListings, band: ref ? { low: ref.b[0], high: ref.b[2] } : null };
+  const r = await pricesearch.search(query, opts);
+  // Nothing matched? Try once more with the customer's own words (often simpler, e.g. "tap cartridge").
+  if (!r.found && alt && alt.trim().toLowerCase() !== String(query).trim().toLowerCase()) {
+    const r2 = await pricesearch.search(alt, opts);
+    if (r2.found) return { ...r2, sources: [...r.sources, ...r2.sources] };
+  }
+  return r;
 }
 function onlineLine(results, quoted) {
   // Use the lowest RETAIL price (one piece a customer can buy); a wholesale price is only used if nothing else was found.
@@ -283,11 +290,11 @@ function searchQueryFor(d, refId, text, brand) {
 }
 
 app.post('/api/parts-prices', async (req, res) => {
-  const { query = '', ref_id = '', quoted, lang = 'en' } = req.body || {};
+  const { query = '', alt = '', ref_id = '', quoted, lang = 'en' } = req.body || {};
   const q = String(query).slice(0, 80);
   if (!q.trim()) return res.status(400).json({ error: lang === 'hi' ? 'पार्ट का नाम चाहिए।' : 'Part name is needed.' });
   try {
-    const r = await onlinePrices(q, ref_id);
+    const r = await onlinePrices(q, ref_id, String(alt).slice(0, 80));
     res.json({ ...r, online_line: onlineLine(r.results, posInt(quoted, 0)), message: r.found ? null : (lang === 'hi' ? 'ऑनलाइन दाम नहीं मिले – अनुमान दिखा रहे हैं।' : 'No live prices found, showing estimate.') });
   } catch (e) {
     res.json({ query: q, found: false, results: [], sources: [], message: lang === 'hi' ? 'ऑनलाइन दाम नहीं मिले – अनुमान दिखा रहे हैं।' : 'No live prices found, showing estimate.' });
@@ -364,9 +371,10 @@ app.post('/api/parts-check', async (req, res) => {
   const linesSource = lines ? 'gemini' : 'template';
   if (!lines) lines = parts.templateLines(name, fairOffer, v && v.verdict !== 'fair' ? quotedN : 0);
   const search_query = searchQueryFor(d, refId, cleanText, cleanBrand);
+  const search_alt = /[^\x00-\x7F]/.test(cleanText) ? '' : `${cleanBrand} ${cleanText}`.trim().slice(0, 80);
   let online = null;
   if (with_prices && search_query) {
-    try { online = await onlinePrices(search_query, refId); } catch (_) { online = { found: false, results: [], sources: [] }; }
+    try { online = await onlinePrices(search_query, refId, search_alt); } catch (_) { online = { found: false, results: [], sources: [] }; }
     const ol = onlineLine(online.results, v && v.verdict !== 'fair' ? quotedN : 0);
     if (ol) lines = [ol, ...lines];
     if (!online.found) online.message = hi ? 'ऑनलाइन दाम नहीं मिले – अनुमान दिखा रहे हैं।' : 'No live prices found, showing estimate.';
@@ -379,7 +387,7 @@ app.post('/api/parts-check', async (req, res) => {
     common_brands: (d.common_brands && d.common_brands.length ? d.common_brands : (ref ? ref.brands : [])).slice(0, 4),
     band: b, qty: q, quoted: quotedN || null, ...(v || {}), fair_offer: fairOffer, margin_pct: parts.MARGIN * 100,
     tip: d.tip || null, confidence: d.confidence || (ref ? 'medium' : 'low'),
-    search_query, online,
+    search_query, search_alt, online,
     bargain_lines: lines, lines_source: linesSource, checklist: parts.CHECKLIST[hi ? 'hi' : 'en'],
   });
 });
