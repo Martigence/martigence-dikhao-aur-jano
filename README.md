@@ -4,7 +4,7 @@
 
 Martigence is a verified home-services platform for small Indian cities, starting in Deoghar, Jharkhand. *Dikhao aur Jano* (“show and know”) lets a customer describe or photograph a home problem in Hindi, Hinglish or English. The app returns the likely problem, how urgent it is, a safety tip, and a fair labour-and-parts price band — then helps the customer check a pro’s quote and book on WhatsApp with that band locked.
 
-**Live demo: (link coming soon)**
+**Live demo: [martigence-dikhao-aur-jano.vercel.app](https://martigence-dikhao-aur-jano.vercel.app)**
 
 Built solo by Roushan Singh, Martigence, for [Startup Buildathon India 2026](https://hack2skill.com).
 
