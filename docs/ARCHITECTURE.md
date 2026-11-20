@@ -60,15 +60,3 @@ flowchart LR
 
 ## Next on Google Cloud (once credits are available)
 Cloud Run for the API, Firestore for job cards and real Deoghar prices (which replace the starting rate card), and the WhatsApp Business API webhook.
-
-## Parts ka Sahi Daam (Parts Price Check + Bargain Helper)
-
-```
-Browser ──POST /api/parts-check──► server.js ──► Gemini (part / bill photo → JSON)
-                                       │            └─ clamp to parts.js reference table (Martigence estimates)
-                                       └─ verdict in code: Fair ≤ typical+15% · Slightly high ≤ high+15% · else Overcharged
-Browser ──POST /api/parts-prices──► pricesearch.js ──► Amazon.in · Flipkart · Industrybuying · IndiaMART search pages
-                                       ├─ parse real price + product URL (never generated)
-                                       ├─ Gemini relevance filter (same part, no multi-packs) → link check → top 3 lowest
-                                       └─ 10-minute in-memory cache
-```

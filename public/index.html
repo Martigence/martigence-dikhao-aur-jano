@@ -63,29 +63,6 @@ ul{padding-left:22px;margin:6px 0}
 @keyframes s{to{transform:rotate(360deg)}}
 footer{max-width:720px;margin:0 auto;padding:10px 16px 40px;color:var(--muted);font-size:.85rem}
 .rules li{margin:4px 0}
-.pnav{display:flex;gap:8px;flex-wrap:wrap;margin:0 0 14px}
-.pnav a{flex:1;text-align:center;text-decoration:none;font-weight:700;border:2px solid var(--brand2);border-radius:12px;padding:10px;min-height:48px;background:#fff;color:var(--brand)}
-.seg{display:flex;border:2px solid var(--brand2);border-radius:12px;overflow:hidden;margin:6px 0 4px}
-.seg button{flex:1;background:#fff;color:var(--brand);border:0;padding:10px;font-size:1rem;font-weight:700;min-height:48px;cursor:pointer}
-.seg button[aria-pressed=true]{background:var(--brand2);color:#fff}
-input[type=text]{width:100%;font-size:1.05rem;padding:12px;border:2px solid #8a9a92;border-radius:12px;font-family:inherit;background:#fff;color:var(--ink)}
-.two{display:grid;grid-template-columns:1fr 1fr;gap:10px}
-.v-overcharged{background:#fbdad6;color:#7a1610}.v-very_low{background:#e3ecff;color:#1d3a7a}
-.band3{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin:10px 0}
-.band3 div{background:#f1f7f3;border-radius:12px;padding:10px;text-align:center;font-size:.85rem}
-.band3 b{display:block;font-size:1.25rem}.band3 .mid{background:var(--brand);color:#fff}
-.sub{border:1px solid var(--line);border-radius:12px;padding:12px;margin:12px 0;background:#fcfdfb}
-.sub h3{margin:0 0 8px;font-size:1.05rem}
-.offer{display:flex;gap:10px;align-items:center;border-bottom:1px solid var(--line);padding:10px 0}
-.offer:last-child{border-bottom:0}
-.offer .rank{background:var(--brand2);color:#fff;border-radius:999px;width:30px;height:30px;display:inline-flex;align-items:center;justify-content:center;font-weight:800;flex:none}
-.offer .op{font-size:1.25rem;font-weight:800;margin-left:auto;white-space:nowrap}
-.line{background:#fff;border:1px solid var(--line);border-left:5px solid var(--accent);border-radius:10px;padding:10px;margin:8px 0;font-size:1.05rem}
-.bill{width:100%;border-collapse:collapse;font-size:.92rem;margin:8px 0}
-.bill th,.bill td{border-bottom:1px solid var(--line);padding:8px 4px;text-align:left;vertical-align:top}
-.bill td.r,.bill th.r{text-align:right;white-space:nowrap}
-.flag{display:inline-block;padding:2px 8px;border-radius:999px;font-weight:800;font-size:.78rem}
-.save{background:#16743f;color:#fff;border-radius:12px;padding:12px;text-align:center;font-weight:800;font-size:1.15rem;margin:10px 0}
 @media (prefers-reduced-motion:reduce){.spinner{animation:none}}
 </style>
 </head>
@@ -99,7 +76,6 @@ input[type=text]{width:100%;font-size:1.05rem;padding:12px;border:2px solid #8a9
   </div>
 </header>
 <main id="main">
-  <nav class="pnav" aria-label="Sections"><a href="#main" onclick="$('desc').focus();return false" data-i18n="navFix">🔧 Show a problem</a><a href="#partsCard" data-i18n="navParts">🧾 Parts ka Sahi Daam</a></nav>
   <section class="card" aria-labelledby="s1">
     <h2 id="s1"><span class="step">1</span><span data-i18n="s1">Show the problem</span></h2>
     <p class="muted" data-i18n="s1d">Type it in Hindi or English, or add a photo. Our Gemini AI tells you the problem, the right pro, how urgent it is and a fair price.</p>
@@ -147,33 +123,6 @@ input[type=text]{width:100%;font-size:1.05rem;padding:12px;border:2px solid #8a9
     </ul>
     <a id="waBtn" class="btn wa" target="_blank" rel="noopener" href="#"><span aria-hidden="true">💬</span><span data-i18n="wa">Book on WhatsApp</span></a>
   </section>
-
-  <section class="card" id="partsCard" aria-labelledby="sp">
-    <h2 id="sp"><span class="step" aria-hidden="true">₹</span><span data-i18n="pT">Parts ka Sahi Daam – Parts Price Check</span></h2>
-    <p class="muted" data-i18n="pD">Pros often overcharge for parts. Type the part (or add a photo of the part or the bill). See the fair price, the cheapest live online prices, and polite lines to bargain.</p>
-    <div class="seg" role="group" aria-label="Mode"><button id="pm-part" aria-pressed="true" onclick="pMode('part')" data-i18n="pmPart">One part</button><button id="pm-bill" aria-pressed="false" onclick="pMode('bill')" data-i18n="pmBill">📄 Bill photo</button></div>
-    <div id="pPartBox">
-      <label for="pText" data-i18n="pL">Which part?</label>
-      <input id="pText" type="text" autocomplete="off" data-i18n-ph="pPh" placeholder="e.g. MCB 16A">
-      <div class="examples" aria-label="Examples">
-        <button class="chip" onclick="pEx('MCB 16A',450)">MCB 16A · ₹450</button>
-        <button class="chip" onclick="pEx('Tap cartridge',450)">Tap cartridge · ₹450</button>
-        <button class="chip" onclick="pEx('Ceiling fan capacitor',250)">Fan capacitor · ₹250</button>
-        <button class="chip" onclick="pEx('Geyser thermostat',600)">Geyser thermostat · ₹600</button>
-        <button class="chip" onclick="pEx('Flush valve',900)">Flush valve · ₹900</button>
-      </div>
-      <div class="two">
-        <div><label for="pBrand" data-i18n="pBrandL">Brand (optional)</label><input id="pBrand" type="text" autocomplete="off" placeholder="Havells"></div>
-        <div><label for="pQuote" data-i18n="pQuoteL">Pro asked (₹)</label><input id="pQuote" type="number" inputmode="numeric" min="1" placeholder="450"></div>
-      </div>
-    </div>
-    <label for="pPhoto" id="pPhotoL" data-i18n="pPhotoL">Photo of the part (optional)</label>
-    <input id="pPhoto" type="file" accept="image/*" capture="environment" class="btn ghost" style="width:100%" onchange="pOnPhoto(event)">
-    <div class="photo-prev" id="pPrev"><img id="pPrevImg" alt="Selected part or bill photo"><button class="chip" onclick="pClearPhoto()" data-i18n="remove">Remove</button></div>
-    <div style="margin-top:14px"><button class="btn big" id="pBtn" onclick="partsCheck()" data-i18n="pGo">Check part price →</button></div>
-    <div id="pErr" role="alert" class="note hidden"></div>
-    <div id="pRes" aria-live="polite"></div>
-  </section>
 </main>
 <footer>
   <p data-i18n="foot">Martigence · Verified home services for Deoghar, Jharkhand · Prices are starting estimates, confirmed by the pro at the visit.</p>
@@ -193,7 +142,7 @@ const t=k=>T[lang][k]??T.en[k]??k;
 const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const inr=n=>'₹'+Number(n).toLocaleString('en-IN');
 function setLang(l){lang=l;localStorage.setItem('mg_lang',l);document.documentElement.lang=l;$('l-en').setAttribute('aria-pressed',l==='en');$('l-hi').setAttribute('aria-pressed',l==='hi');
-document.querySelectorAll('[data-i18n]').forEach(e=>e.textContent=t(e.dataset.i18n));document.querySelectorAll('[data-i18n-ph]').forEach(e=>e.placeholder=t(e.dataset.i18nPh));if(last)renderRes(last);if(pLast)pRender();}
+document.querySelectorAll('[data-i18n]').forEach(e=>e.textContent=t(e.dataset.i18n));document.querySelectorAll('[data-i18n-ph]').forEach(e=>e.placeholder=t(e.dataset.i18nPh));if(last)renderRes(last);}
 function ex(b){$('desc').value=b.textContent;$('desc').focus()}
 function onPhoto(e){const f=e.target.files[0];if(!f)return;const r=new FileReader();r.onload=()=>{const im=new Image();im.onload=()=>{const m=1024,s=Math.min(1,m/Math.max(im.width,im.height));const c=document.createElement('canvas');c.width=im.width*s;c.height=im.height*s;c.getContext('2d').drawImage(im,0,0,c.width,c.height);img=c.toDataURL('image/jpeg',.82);mime='image/jpeg';$('prevImg').src=img;$('prev').style.display='block'};im.src=r.result};r.readAsDataURL(f)}
 function clearPhoto(){img=null;$('photo').value='';$('prev').style.display='none'}
@@ -239,63 +188,6 @@ const lines=[lang==='hi'?'नमस्ते Martigence, मुझे प्र�
 if(last.quote)lines.push(`• ${lang==='hi'?'प्रो का रेट':'Pro quote checked'}: ${inr(last.quote.q)} → ${T.en[last.quote.verdict]}`);
 lines.push(lang==='hi'?'मेरा एरिया (देवघर): ':'My area (Deoghar): ');
 $('waBtn').href='https://wa.me/917250522544?text='+encodeURIComponent(lines.join('\n'));}
-
-// ---------- Parts ka Sahi Daam ----------
-Object.assign(T.en,{navFix:'🔧 Show a problem',navParts:'🧾 Parts ka Sahi Daam',pT:'Parts ka Sahi Daam – Parts Price Check',pD:'Pros often overcharge for parts. Type the part (or add a photo of the part or the bill). See the fair price, the cheapest live online prices, and polite lines to bargain.',pmPart:'One part',pmBill:'📄 Bill photo',pL:'Which part?',pPh:'e.g. MCB 16A',pBrandL:'Brand (optional)',pQuoteL:'Pro asked (₹)',pPhotoL:'Photo of the part (optional)',pBillPhotoL:'Photo of the bill / estimate',pGo:'Check part price →',pEmpty:'Please type the part name or add a photo.',pNeedBill:'Please add a photo of the bill.',
-pv_fair:'✅ Fair price',pv_slightly_high:'⚠️ A bit high',pv_overcharged:'❌ Overcharged',pv_very_low:'🔍 Very low – check the quality',vsTyp:'vs typical',low:'Low',typical:'Typical',high:'High',estNote:'Martigence estimate for small-city shops (like Deoghar). Not official MRP. A pro may add up to {m}% for travel / bringing the part.',brands:'Common brands',tip:'Tip',
-onlineT:'🛒 Top 3 online prices (live)',onlineWait:'Searching shopping sites…',onlineNone:'No live prices found, showing estimate.',onlineSrc:'Searched',onlineNote:'Prices read live from the store pages just now. Delivery/GST may be extra. Check the exact model before buying.',wholesale:'wholesale',view:'View',
-bargT:'🗣️ Bargain Helper – say this politely',copy:'📋 Copy',copied:'✅ Copied',sendWA:'💬 Send on WhatsApp',checkT:'✅ Before you pay',
-billT:'Bill check',item:'Item',qty:'Qty',charged:'Charged',fairUpTo:'Fair up to',labourLine:'labour – use the Extra-Charge Checker',savings:'You could save about',noSave:'All parts on this bill look fair.',billUnread:'The photo is not clear enough to read the bill. Try a clearer photo, or check each part in "One part" mode.',notListed:'not in our list'});
-Object.assign(T.hi,{navFix:'🔧 समस्या दिखाएँ',navParts:'🧾 पार्ट्स का सही दाम',pT:'पार्ट्स का सही दाम – पार्ट की कीमत जाँचें',pD:'मिस्त्री अक्सर पार्ट्स के ज़्यादा पैसे लेते हैं। पार्ट का नाम लिखें (या पार्ट या बिल की फ़ोटो लगाएँ)। सही दाम, ऑनलाइन सबसे सस्ते दाम और मोलभाव की विनम्र लाइनें देखें।',pmPart:'एक पार्ट',pmBill:'📄 बिल की फ़ोटो',pL:'कौन सा पार्ट?',pPh:'जैसे: MCB 16A',pBrandL:'ब्रांड (ज़रूरी नहीं)',pQuoteL:'मिस्त्री ने माँगा (₹)',pPhotoL:'पार्ट की फ़ोटो (ज़रूरी नहीं)',pBillPhotoL:'बिल / एस्टिमेट की फ़ोटो',pGo:'पार्ट का दाम जाँचें →',pEmpty:'पार्ट का नाम लिखें या फ़ोटो लगाएँ।',pNeedBill:'बिल की फ़ोटो लगाएँ।',
-pv_fair:'✅ सही दाम',pv_slightly_high:'⚠️ थोड़ा ज़्यादा',pv_overcharged:'❌ ज़्यादा पैसे माँगे',pv_very_low:'🔍 बहुत कम – क्वालिटी जाँचें',vsTyp:'आम दाम से',low:'कम',typical:'आम दाम',high:'ज़्यादा',estNote:'छोटे शहरों (जैसे देवघर) की दुकानों के लिए Martigence का अनुमान। यह सरकारी MRP नहीं है। आने-जाने / पार्ट लाने के लिए मिस्त्री {m}% तक जोड़ सकता है।',brands:'आम ब्रांड',tip:'सलाह',
-onlineT:'🛒 ऑनलाइन सबसे सस्ते 3 दाम (लाइव)',onlineWait:'शॉपिंग साइट्स पर ढूँढ रहे हैं…',onlineNone:'ऑनलाइन दाम नहीं मिले – अनुमान दिखा रहे हैं।',onlineSrc:'यहाँ ढूँढा',onlineNote:'दाम अभी-अभी दुकानों के पेज से पढ़े गए। डिलीवरी/GST अलग हो सकता है। खरीदने से पहले मॉडल मिला लें।',wholesale:'थोक',view:'देखें',
-bargT:'🗣️ मोलभाव मदद – विनम्रता से कहें',copy:'📋 कॉपी',copied:'✅ कॉपी हुआ',sendWA:'💬 WhatsApp पर भेजें',checkT:'✅ पैसे देने से पहले',
-billT:'बिल की जाँच',item:'सामान',qty:'संख्या',charged:'लिया',fairUpTo:'सही (तक)',labourLine:'लेबर – एक्स्ट्रा-चार्ज चेकर से जाँचें',savings:'आप लगभग इतना बचा सकते हैं',noSave:'इस बिल के सारे पार्ट्स का दाम ठीक लग रहा है।',billUnread:'फ़ोटो साफ़ नहीं है, बिल पढ़ा नहीं गया। साफ़ फ़ोटो लें, या हर पार्ट "एक पार्ट" में जाँचें।',notListed:'सूची में नहीं'});
-let pmode='part',pImg=null,pLast=null,pOnline=null,pScript=null;
-function pMode(m){pmode=m;$('pm-part').setAttribute('aria-pressed',m==='part');$('pm-bill').setAttribute('aria-pressed',m==='bill');$('pPartBox').classList.toggle('hidden',m==='bill');$('pPhotoL').textContent=t(m==='bill'?'pBillPhotoL':'pPhotoL');$('pPhotoL').dataset.i18n=m==='bill'?'pBillPhotoL':'pPhotoL'}
-function pEx(n,q){pMode('part');$('pText').value=n;$('pQuote').value=q;$('pText').focus()}
-function pOnPhoto(e){const f=e.target.files[0];if(!f)return;const r=new FileReader();r.onload=()=>{const im=new Image();im.onload=()=>{const m=pmode==='bill'?1600:1024,s=Math.min(1,m/Math.max(im.width,im.height));const c=document.createElement('canvas');c.width=im.width*s;c.height=im.height*s;c.getContext('2d').drawImage(im,0,0,c.width,c.height);pImg=c.toDataURL('image/jpeg',.85);$('pPrevImg').src=pImg;$('pPrev').style.display='block'};im.src=r.result};r.readAsDataURL(f)}
-function pClearPhoto(){pImg=null;$('pPhoto').value='';$('pPrev').style.display='none'}
-async function partsCheck(){$('pErr').classList.add('hidden');const text=$('pText').value.trim();
-if(pmode==='bill'&&!pImg){$('pErr').textContent=t('pNeedBill');$('pErr').classList.remove('hidden');return}
-if(pmode==='part'&&!text&&!pImg){$('pErr').textContent=t('pEmpty');$('pErr').classList.remove('hidden');return}
-const b=$('pBtn');busy(b,true);pOnline=null;
-try{const j=await api('/api/parts-check',{mode:pmode,text:pmode==='part'?text:'',brand:$('pBrand').value.trim(),quoted:$('pQuote').value,image:pImg,mime:'image/jpeg',lang});pLast=j;pScript=lang==='hi'?'hi':'en';pRender();$('pRes').scrollIntoView({behavior:'smooth'});
-if(j.mode==='part'&&j.found&&j.search_query){pOnline='loading';pRender();
-try{pOnline=await api('/api/parts-prices',{query:j.search_query,ref_id:j.ref_id,quoted:j.verdict&&j.verdict!=='fair'?j.quoted:0,lang})}catch(e){pOnline={found:false,results:[],sources:[]}}pRender()}}
-catch(e){$('pErr').textContent=e.message&&e.message!=='error'?e.message:t('fail');$('pErr').classList.remove('hidden')}finally{busy(b,false,'pGo')}}
-function pLines(){const j=pLast;let L=(j.bargain_lines||[]).slice();if(pOnline&&pOnline.online_line)L=[pOnline.online_line,...L];return L}
-function pText(){return pLines().map(l=>l[pScript]||l.en).join('\n')}
-function pCopy(btn){const s=pText();(navigator.clipboard?navigator.clipboard.writeText(s):Promise.reject()).catch(()=>{const a=document.createElement('textarea');a.value=s;document.body.appendChild(a);a.select();document.execCommand('copy');a.remove()}).finally(()=>{btn.textContent=t('copied');setTimeout(()=>btn.textContent=t('copy'),1800)})}
-function pSetScript(k){pScript=k;pRender()}
-function pRender(){const j=pLast;if(!j)return;let h='';if(j.note)h+=`<div class="note">ℹ️ ${esc(j.note)}</div>`;
-if(j.mode==='bill'){h+=`<div class="sub"><h3>📄 ${t('billT')}</h3>`;if(j.photo_seen)h+=`<p class="muted">${esc(j.photo_seen)}</p>`;
-if(!j.items||!j.items.length){h+=`<p>${t('billUnread')}</p></div>`}else{
-h+=`<table class="bill"><thead><tr><th scope="col">${t('item')}</th><th scope="col" class="r">${t('qty')}</th><th scope="col" class="r">${t('charged')}</th><th scope="col" class="r">${t('fairUpTo')}</th></tr></thead><tbody>`;
-for(const it of j.items){const v=it.verdict;h+=`<tr><td>${esc(it.name)}${v?`<br><span class="flag v-${v}">${t('pv_'+v)}${it.savings?` +${inr(it.price-it.typical_total)}`:''}</span>`:`<br><span class="muted">${it.kind==='labour'?t('labourLine'):''}</span>`}</td><td class="r">${it.qty}</td><td class="r">${inr(it.price)}</td><td class="r">${v?inr(it.fair_max):'–'}</td></tr>`}
-h+=`</tbody></table>`;h+=j.total_savings>0?`<div class="save">💰 ${t('savings')} ${inr(j.total_savings)}</div>`:`<div class="verdict v-fair">${t('noSave')}</div>`;
-h+=`<p class="src">${t('estNote').replace('{m}',j.margin_pct)}</p></div>`}}
-else if(!j.found){h+=`<div class="note">${esc(j.message)}</div>`}
-else{h+=`<p><b>${esc(j.part_name)}</b>${j.ref_name&&j.ref_name!==j.part_name?` <span class="muted">(${esc(j.ref_name)})</span>`:''}${j.qty>1?` × ${j.qty}`:''}${j.unit?` <span class="muted">${esc(j.unit)}</span>`:''}</p>`;
-if(j.photo_seen)h+=`<p class="muted"><b>${t('seen')}:</b> ${esc(j.photo_seen)}</p>`;
-if(j.verdict)h+=`<div class="verdict v-${j.verdict}">${t('pv_'+j.verdict)} – ${inr(j.quoted)}${j.diff>0?` (+${inr(j.diff)} ${t('vsTyp')})`:''}</div>`;
-h+=`<div class="band3"><div>${t('low')}<b>${inr(j.band.low*j.qty)}</b></div><div class="mid">${t('typical')}<b>${inr(j.band.typical*j.qty)}</b></div><div>${t('high')}<b>${inr(j.band.high*j.qty)}</b></div></div>`;
-h+=`<p class="src" style="margin-top:0">${t('estNote').replace('{m}',j.margin_pct)}</p>`;
-if(j.common_brands&&j.common_brands.length)h+=`<p><b>${t('brands')}:</b> ${j.common_brands.map(esc).join(', ')}</p>`;
-if(j.tip)h+=`<div class="safety calm">💡 <b>${t('tip')}:</b> ${esc(j.tip)}</div>`;
-h+=`<div class="sub" aria-live="polite"><h3>${t('onlineT')}</h3>`;
-if(pOnline==='loading')h+=`<p class="muted"><span class="spinner" style="border-color:rgba(19,112,79,.3);border-top-color:#13704f"></span>${t('onlineWait')}</p>`;
-else if(pOnline&&pOnline.found){h+=pOnline.results.map((r,i)=>`<div class="offer"><span class="rank">${i+1}</span><div><b>${esc(r.store)}</b>${r.retail?'':` <span class="sample">${t('wholesale')}</span>`}<div class="muted" style="font-size:.85rem">${esc(r.title)}</div><a href="${esc(r.url)}" target="_blank" rel="noopener nofollow">${t('view')} ↗</a></div><span class="op">${inr(r.price)}</span></div>`).join('');
-h+=`<p class="src">${t('onlineNote')}<br>${t('onlineSrc')}: ${pOnline.sources.map(s=>`<a href="${esc(s.url)}" target="_blank" rel="noopener nofollow">${esc(s.store)}</a> (${s.listings})`).join(' · ')}</p>`}
-else if(pOnline)h+=`<p>${t('onlineNone')}</p>${pOnline.sources&&pOnline.sources.length?`<p class="src">${t('onlineSrc')}: ${pOnline.sources.map(s=>esc(s.store)+' ('+s.listings+')').join(' · ')}</p>`:''}`;
-h+=`</div>`}
-const L=pLast.bargain_lines?pLines():[];
-if(L.length){h+=`<div class="sub"><h3>${t('bargT')}</h3><div class="seg" role="group" aria-label="Script">${[['hi','हिंदी'],['hinglish','Hinglish'],['en','English']].map(([k,n])=>`<button aria-pressed="${pScript===k}" onclick="pSetScript('${k}')">${n}</button>`).join('')}</div>`;
-h+=L.map(l=>`<p class="line" lang="${pScript==='hi'?'hi':'en'}">“${esc(l[pScript]||l.en)}”</p>`).join('');
-h+=`<div class="two"><button class="btn ghost" onclick="pCopy(this)">${t('copy')}</button><a class="btn wa" style="margin:0" target="_blank" rel="noopener" href="https://wa.me/?text=${encodeURIComponent(pText())}">${t('sendWA')}</a></div></div>`}
-if(j.checklist)h+=`<div class="sub"><h3>${t('checkT')}</h3><ul>${(T[lang]===T.hi?['डिब्बे पर छपा MRP देखें','पुराना पार्ट वापस माँगें','बिल और वारंटी माँगें','लेबर और पार्ट्स का रेट अलग-अलग पूछें']:['Check the MRP printed on the box','Ask for the old part back','Ask for a bill and the warranty','Ask for labour and parts separately']).map(x=>`<li>${esc(x)}</li>`).join('')}</ul></div>`;
-if(j.source)h+=`<p class="src">${j.source==='gemini'?'✨ '+t('viaGem')+(j.model?' ('+esc(j.model)+')':''):'📐 '+t('viaRules')}</p>`;
-$('pRes').innerHTML=h}
 setLang(lang);
 </script>
 </body>
