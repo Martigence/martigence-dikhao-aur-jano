@@ -7,7 +7,10 @@ const dotenv = require('dotenv');
 const { GoogleGenAI, Type } = require('@google/genai');
 const rules = require('./rules');
 
-const ENV_PATH = path.join(__dirname, '..', '.env');
+const ENV_PATHS = [
+  path.join(__dirname, '.env'),
+  path.join(__dirname, '..', '.env'),
+];
 const PORT = process.env.PORT || 8080;
 // gemini-2.5-flash is closed to new API keys (404), so newer free Flash models come first. Override with GEMINI_MODEL in .env.
 // Measured on this key: 3.8-flash ~6-8 s, 3.5-flash-lite ~0.5-2 s. Worst case ~27 s before the rule-based fallback.
@@ -16,12 +19,19 @@ const TIMEOUT_MS = { 'gemini-3.8-flash': 16000 };
 const THINKING = { 'gemini-3.8-flash': { thinkingLevel: 'LOW' } };
 
 // .env is re-read on EVERY request, so a new key works without a restart.
+function readEnv() {
+  for (const p of ENV_PATHS) {
+    try {
+      if (fs.existsSync(p)) return dotenv.parse(fs.readFileSync(p));
+    } catch (_) {}
+  }
+  return {};
+}
+
 function getKey() {
   try {
-    if (fs.existsSync(ENV_PATH)) {
-      const env = dotenv.parse(fs.readFileSync(ENV_PATH));
-      if (env.GEMINI_API_KEY && env.GEMINI_API_KEY.trim()) return env.GEMINI_API_KEY.trim();
-    }
+    const env = readEnv();
+    if (env.GEMINI_API_KEY && env.GEMINI_API_KEY.trim()) return env.GEMINI_API_KEY.trim();
   } catch (_) {}
   return (process.env.GEMINI_API_KEY || '').trim() || null;
 }
@@ -32,7 +42,7 @@ async function callGemini({ parts, schema, system }) {
   if (!key) throw new Error('NO_KEY');
   const ai = new GoogleGenAI({ apiKey: key });
   let MODELS = DEFAULT_MODELS;
-  try { const m = fs.existsSync(ENV_PATH) && dotenv.parse(fs.readFileSync(ENV_PATH)).GEMINI_MODEL; if (m) MODELS = [m, ...DEFAULT_MODELS.filter(x => x !== m)]; } catch (_) {}
+  try { const m = readEnv().GEMINI_MODEL; if (m) MODELS = [m, ...DEFAULT_MODELS.filter(x => x !== m)]; } catch (_) {}
   const order = lastGoodModel ? [lastGoodModel, ...MODELS.filter(m => m !== lastGoodModel)] : MODELS;
   let lastErr;
   for (const model of order) {
@@ -169,4 +179,7 @@ app.post('/api/match', (req, res) => {
   res.json({ sample_data: true, pros: rules.matchScore(category, area) });
 });
 
-app.listen(PORT, '0.0.0.0', () => console.log(`Martigence Dikhao aur Jano running on :${PORT} (key present: ${!!getKey()})`));
+if (require.main === module) {
+  app.listen(PORT, '0.0.0.0', () => console.log(`Martigence Dikhao aur Jano running on :${PORT} (key present: ${!!getKey()})`));
+}
+module.exports = app;

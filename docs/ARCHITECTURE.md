@@ -28,11 +28,11 @@ flowchart LR
 ## Components
 | Layer | What | Where |
 |---|---|---|
-| Frontend | Mobile-first single page, Hindi/English toggle, large text, high contrast, labelled inputs, aria-live results. Photos are resized in the browser to 1024px JPEG before upload. | `app/public/index.html` |
-| API server | Node.js + Express. Gemini is called **only here**; the API key never reaches the browser. | `app/server.js` |
-| Gemini integration | Official `@google/genai` SDK. Multimodal input (photo + text). `responseSchema` gives strict JSON with enums for category, urgency, job and confidence. The system prompt holds the Deoghar rate card and urgency rules. Model chain: `gemini-3.8-flash` (thinking LOW, 16 s timeout) → `gemini-3.5-flash-lite` (11 s timeout) → rule-based fallback. `gemini-2.5-flash` returns 404 for new API keys, so newer free Flash models come first. Override with `GEMINI_MODEL=` in `.env`. | `app/server.js` |
-| Rule engine | Rate card for 18 common jobs, keyword urgency guards (sparking, gas, flooding → URGENT, whatever the model says), clamps the AI price band to within 2× of the rate card, the quote verdict, and a complete rule-based fallback. | `app/rules.js` |
-| MatchScore | Public rulebook, **not AI**: skill 40 + distance 25 + rating 20 + fair-pricing record 15. Nobody can pay to rank higher. Uses **SAMPLE pros (example data)**. | `app/rules.js` |
+| Frontend | Mobile-first single page, Hindi/English toggle, large text, high contrast, labelled inputs, aria-live results. Photos are resized in the browser to 1024px JPEG before upload. | `public/index.html` |
+| API server | Node.js + Express. Gemini is called **only here**; the API key never reaches the browser. | `server.js` |
+| Gemini integration | Official `@google/genai` SDK. Multimodal input (photo + text). `responseSchema` gives strict JSON with enums for category, urgency, job and confidence. The system prompt holds the Deoghar rate card and urgency rules. Model chain: `gemini-3.8-flash` (thinking LOW, 16 s timeout) → `gemini-3.5-flash-lite` (11 s timeout) → rule-based fallback. `gemini-2.5-flash` returns 404 for new API keys, so newer free Flash models come first. Override with `GEMINI_MODEL=` in `.env`. | `server.js` |
+| Rule engine | Rate card for 18 common jobs, keyword urgency guards (sparking, gas, flooding → URGENT, whatever the model says), clamps the AI price band to within 2× of the rate card, the quote verdict, and a complete rule-based fallback. | `rules.js` |
+| MatchScore | Public rulebook, **not AI**: skill 40 + distance 25 + rating 20 + fair-pricing record 15. Nobody can pay to rank higher. Uses **SAMPLE pros (example data)**. | `rules.js` |
 | Booking | `wa.me/917250522544` with a prefilled summary: problem, pro, urgency, locked band, ₹69 visit fee and the checked quote. | frontend |
 
 ## API
@@ -54,9 +54,9 @@ flowchart LR
 - Kaam ki Guarantee: if the same fault comes back within 7 days, the same pro returns free.
 
 ## Config and running
-- Key: `GEMINI_API_KEY` in `/home/box/martigence-buildathon/.env` (git-ignored). **`.env` is re-read on every request**, so a new key or `GEMINI_MODEL` works without a restart.
-- `./start.sh` restarts the server on :8080 and a Cloudflare quick tunnel, then prints the public URL.
-- Logs: `server.log`, `tunnel.log`.
+- Key: `GEMINI_API_KEY` in a `.env` file next to `server.js`, or in the parent folder, or as an environment variable (git-ignored). The server also accepts `GEMINI_API_KEY` from the process environment, which is how a host like Vercel should inject it. **`.env` is re-read on every request**, so a new key or `GEMINI_MODEL` works without a restart.
+- Start locally with `npm start`. The port is `process.env.PORT`, default `8080`.
+- Copy `.env.example` to `.env` and paste your key. Never commit `.env`.
 
 ## Next on Google Cloud (once credits are available)
 Cloud Run for the API, Firestore for job cards and real Deoghar prices (which replace the starting rate card), and the WhatsApp Business API webhook.
