@@ -262,7 +262,7 @@ if(pmode==='part'&&!text&&!pImg){$('pErr').textContent=t('pEmpty');$('pErr').cla
 const b=$('pBtn');busy(b,true);pOnline=null;
 try{const j=await api('/api/parts-check',{mode:pmode,text:pmode==='part'?text:'',brand:$('pBrand').value.trim(),quoted:$('pQuote').value,image:pImg,mime:'image/jpeg',lang});pLast=j;pScript=lang==='hi'?'hi':'en';pRender();$('pRes').scrollIntoView({behavior:'smooth'});
 if(j.mode==='part'&&j.found&&j.search_query){pOnline='loading';pRender();
-try{pOnline=await api('/api/parts-prices',{query:j.search_query,alt:j.search_alt||'',ref_id:j.ref_id,quoted:j.verdict&&j.verdict!=='fair'?j.quoted:0,lang})}catch(e){pOnline={found:false,results:[],sources:[]}}pRender()}}
+try{pOnline=await api('/api/parts-prices',{query:j.search_query,ref_id:j.ref_id,quoted:j.verdict&&j.verdict!=='fair'?j.quoted:0,lang})}catch(e){pOnline={found:false,results:[],sources:[]}}pRender()}}
 catch(e){$('pErr').textContent=e.message&&e.message!=='error'?e.message:t('fail');$('pErr').classList.remove('hidden')}finally{busy(b,false,'pGo')}}
 function pLines(){const j=pLast;let L=(j.bargain_lines||[]).slice();if(pOnline&&pOnline.online_line)L=[pOnline.online_line,...L];return L}
 function pText(){return pLines().map(l=>l[pScript]||l.en).join('\n')}
