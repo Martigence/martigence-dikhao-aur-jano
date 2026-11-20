@@ -6,6 +6,8 @@ Martigence is a verified home-services platform for small Indian cities, startin
 
 **Live demo: [martigence-dikhao-aur-jano.vercel.app](https://martigence-dikhao-aur-jano.vercel.app)**
 
+Also deployed on Google Cloud Run: [martigence-dikhao-aur-jano-542822577542.asia-south1.run.app](https://martigence-dikhao-aur-jano-542822577542.asia-south1.run.app)
+
 Built solo by Roushan Singh, Martigence, for [Startup Buildathon India 2026](https://hack2skill.com).
 
 ## The problem
@@ -100,6 +102,7 @@ flowchart LR
 │   ├── ARCHITECTURE.md
 │   └── architecture.png
 ├── .env.example       # Template only — no secrets
+├── .gcloudignore      # Keeps .env and node_modules out of Cloud Run uploads
 ├── package.json
 ├── LICENSE            # MIT
 └── README.md
@@ -121,6 +124,21 @@ npm start
 Open [http://localhost:8080](http://localhost:8080). The port is `process.env.PORT`, default `8080`.
 
 Without a key, the app still runs and shows a rule-based estimate. With a free Gemini key from [Google AI Studio](https://aistudio.google.com/apikey), diagnoses use the model chain above.
+
+## Deployment
+
+| Where | Details |
+| --- | --- |
+| **Google Cloud Run** (primary) | Region `asia-south1` (Mumbai), deployed from source with `gcloud run deploy --source .` (Buildpacks build, image stored in Artifact Registry). Scales 0–2 instances, 512 MiB. Public URL: [martigence-dikhao-aur-jano-542822577542.asia-south1.run.app](https://martigence-dikhao-aur-jano-542822577542.asia-south1.run.app) |
+| **Secret Manager** | The Gemini API key is stored as the secret `gemini-api-key` and mounted into Cloud Run as the `GEMINI_API_KEY` environment variable. It is never in the repo, the image or the browser. `.gcloudignore` keeps `.env` and `node_modules` out of the upload. |
+| **Vercel** (mirror) | The same `server.js` app runs on Vercel at [martigence-dikhao-aur-jano.vercel.app](https://martigence-dikhao-aur-jano.vercel.app) as a backup. |
+
+```bash
+gcloud secrets create gemini-api-key --data-file=-   # paste the key via stdin
+gcloud run deploy martigence-dikhao-aur-jano --source . --region asia-south1 \
+  --allow-unauthenticated --min-instances 0 --max-instances 2 --memory 512Mi \
+  --set-secrets GEMINI_API_KEY=gemini-api-key:latest
+```
 
 ## API
 
