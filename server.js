@@ -14,13 +14,17 @@ const ENV_PATHS = [
   path.join(__dirname, '..', '.env'),
 ];
 const PORT = process.env.PORT || 8080;
-// gemini-2.5-flash is closed to new API keys (404), so newer free Flash models come first. Override with GEMINI_MODEL in .env.
-// Measured on this key: 3.8-flash ~6-8 s, 3.5-flash-lite ~0.5-2 s. Worst case ~27 s before the rule-based fallback.
-const DEFAULT_MODELS = ['gemini-3.8-flash', 'gemini-3.5-flash-lite'];
-// Parts checks need a quick answer in a live demo, so they try the fast model first.
+// gemini-2.5-flash / 2.5-flash-lite are closed to new API keys (404), so newer free Flash models are used. Override with GEMINI_MODEL in .env.
+// Measured on this key (20 Nov): 3.5-flash-lite ~1 s, 3.1-flash-lite ~1.3 s, 3.8-flash ~6-16 s. 3.5-flash often 503 (overloaded).
+const DEFAULT_MODELS = ['gemini-3.8-flash', 'gemini-3.5-flash-lite', 'gemini-3.1-flash-lite'];
+// Parts checks need a quick answer in a live demo, so they use the fast Flash-Lite chain first.
 const FAST_MODEL = 'gemini-3.5-flash-lite';
+const FAST_CHAIN = ['gemini-3.5-flash-lite', 'gemini-3.1-flash-lite', 'gemini-3.8-flash'];
 const TIMEOUT_MS = { 'gemini-3.8-flash': 16000 };
+const IMAGE_TIMEOUT_MS = { 'gemini-3.8-flash': 25000 };
 const THINKING = { 'gemini-3.8-flash': { thinkingLevel: 'LOW' } };
+const RETRYABLE = /\b(429|500|503|504)\b|UNAVAILABLE|RESOURCE_EXHAUSTED|overloaded|high demand|TIMEOUT|fetch failed|ECONNRESET/i;
+const sleep = ms => new Promise(r => setTimeout(r, ms));
 
 // .env is re-read on EVERY request, so a new key works without a restart.
 function readEnv() {
@@ -41,37 +45,53 @@ function getKey() {
 }
 
 let lastGoodModel = null;
-async function callGemini({ parts, schema, system, prefer }) {
+// Tries every model in the chain; a busy model (503/429/timeout) gets one quick retry with backoff first.
+// deadlineMs caps the whole call so the customer never waits forever.
+async function callGemini({ parts, schema, system, prefer, chain, deadlineMs = 30000 }) {
+  const env = readEnv();
+  if ((process.env.GEMINI_DISABLE || env.GEMINI_DISABLE) === '1') throw new Error('DISABLED'); // test switch: simulate Gemini down
   const key = getKey();
   if (!key) throw new Error('NO_KEY');
   const ai = new GoogleGenAI({ apiKey: key });
-  let MODELS = DEFAULT_MODELS;
-  try { const m = readEnv().GEMINI_MODEL; if (m) MODELS = [m, ...DEFAULT_MODELS.filter(x => x !== m)]; } catch (_) {}
-  const first = prefer || lastGoodModel;
+  let MODELS = chain || DEFAULT_MODELS;
+  const forced = process.env.GEMINI_MODEL || env.GEMINI_MODEL;
+  if (forced) MODELS = [forced, ...MODELS.filter(x => x !== forced)];
+  const first = prefer || (chain ? null : lastGoodModel);
   const order = first ? [first, ...MODELS.filter(m => m !== first)] : MODELS;
+  const hasImage = parts.some(p => p.inlineData);
+  const end = Date.now() + deadlineMs;
   let lastErr;
   for (const model of order) {
-    try {
-      const res = await Promise.race([
-        ai.models.generateContent({
-          model,
-          contents: [{ role: 'user', parts }],
-          config: {
-            systemInstruction: system,
-            responseMimeType: 'application/json',
-            responseSchema: schema,
-            temperature: 0.2,
-            ...(THINKING[model] ? { thinkingConfig: THINKING[model] } : {}),
-          },
-        }),
-        new Promise((_, rej) => setTimeout(() => rej(new Error('TIMEOUT')), TIMEOUT_MS[model] || 11000)),
-      ]);
-      const data = JSON.parse(res.text);
-      if (!prefer) lastGoodModel = model;
-      return { data, model };
-    } catch (e) {
-      lastErr = e;
-      console.error(`[gemini] ${model} failed: ${String(e.message || e).slice(0, 160)}`);
+    for (let attempt = 0; attempt < 2; attempt++) {
+      const left = end - Date.now();
+      if (left < 1500) throw lastErr || new Error('TIMEOUT');
+      const limit = Math.min(left, (hasImage ? IMAGE_TIMEOUT_MS[model] || 15000 : TIMEOUT_MS[model] || 9000));
+      try {
+        const res = await Promise.race([
+          ai.models.generateContent({
+            model,
+            contents: [{ role: 'user', parts }],
+            config: {
+              systemInstruction: system,
+              responseMimeType: 'application/json',
+              responseSchema: schema,
+              temperature: 0.2,
+              ...(THINKING[model] ? { thinkingConfig: THINKING[model] } : {}),
+            },
+          }),
+          new Promise((_, rej) => setTimeout(() => rej(new Error('TIMEOUT')), limit)),
+        ]);
+        const data = JSON.parse(res.text);
+        if (!prefer && !chain) lastGoodModel = model;
+        return { data, model };
+      } catch (e) {
+        lastErr = e;
+        const msg = String(e.message || e);
+        console.error(`[gemini] ${model} try ${attempt + 1} failed: ${msg.slice(0, 160)}`);
+        // Retry the same model once only for "busy" errors, and not after a long timeout (move on instead).
+        if (attempt === 0 && RETRYABLE.test(msg) && msg !== 'TIMEOUT') { await sleep(600 + Math.random() * 600); continue; }
+        break;
+      }
     }
   }
   throw lastErr || new Error('GEMINI_FAILED');
@@ -207,6 +227,17 @@ const partSchema = {
   required: ['part_name', 'ref_id', 'low', 'typical', 'high', 'quantity', 'search_query', 'quoted_in_text', 'tip', 'bargain_lines', 'confidence'],
   propertyOrdering: ['part_name', 'photo_seen', 'ref_id', 'search_query', 'common_brands', 'low', 'typical', 'high', 'quantity', 'quoted_in_text', 'tip', 'bargain_lines', 'confidence'],
 };
+// Small, fast photo step: just name the part and give shopping keywords.
+const identifySchema = {
+  type: Type.OBJECT,
+  properties: {
+    part_name_en: { type: Type.STRING, description: 'Short English name of the main part/product, e.g. "4 socket extension board"' },
+    search_query: { type: Type.STRING, description: 'Short ENGLISH shopping search query, 2-5 words' },
+    ref_id: { type: Type.STRING, enum: REF_ENUM },
+    photo_seen: { type: Type.STRING, description: 'One short sentence: what is in the photo' },
+  },
+  required: ['part_name_en', 'search_query', 'ref_id'],
+};
 const billSchema = {
   type: Type.OBJECT,
   properties: {
@@ -253,7 +284,7 @@ const judgeSchema = { type: Type.OBJECT, properties: { keep: { type: Type.ARRAY,
 async function judgeListings(query, cands) {
   const list = cands.map((c, i) => `${i}. [${c.store}] ${c.title.slice(0, 260)} – ₹${c.price}`).join('\n');
   const g = await callGemini({
-    parts: [{ text: `Part the customer needs: "${query}"\nListings:\n${list}` }], schema: judgeSchema, prefer: FAST_MODEL,
+    parts: [{ text: `Part the customer needs: "${query}"\nListings:\n${list}` }], schema: judgeSchema, chain: FAST_CHAIN.slice(0, 2), deadlineMs: 9000,
     system: 'You filter online shopping listings. Return in keep the indexes of listings that are the SAME part a home customer in India needs for normal household AC wiring/plumbing (same type and rating; exclude DC/solar MCBs; e.g. a single pole 16A MCB is not a 2/3/4 pole MCB or a 32A MCB; a tap cartridge is not a whole tap). Exclude multi-packs and sets ("pack of 2", "pack-6", "set of 5", "combo") – keep only single pieces – and exclude accessories and unrelated items. If the query does not say pole/size, keep reasonable household variants. Return [] if none match. Never add new items.',
   });
   return g.data.keep;
@@ -262,12 +293,21 @@ async function onlinePrices(query, refId, alt) {
   const ref = parts.PARTS[refId];
   const opts = { judge: judgeListings, band: ref ? { low: ref.b[0], high: ref.b[2] } : null };
   const r = await pricesearch.search(query, opts);
-  // Nothing matched? Try once more with the customer's own words (often simpler, e.g. "tap cartridge").
-  if (!r.found && alt && alt.trim().toLowerCase() !== String(query).trim().toLowerCase()) {
-    const r2 = await pricesearch.search(alt, opts);
+  // Nothing matched? Try once more with the customer's own words, then with the reference part name.
+  const tried = new Set([String(query).trim().toLowerCase()]);
+  for (const q2 of [alt, ref && ref.en.replace(/\(.*?\)/g, '').replace(/\s*\/.*$/, '')]) {
+    if (r.found || !q2 || !q2.trim() || tried.has(q2.trim().toLowerCase()) || /[^\x00-\x7F]/.test(q2)) continue;
+    tried.add(q2.trim().toLowerCase());
+    const r2 = await pricesearch.search(q2, opts);
     if (r2.found) return { ...r2, sources: [...r.sources, ...r2.sources] };
   }
   return r;
+}
+// When our table has no band for a part, a band is made from the REAL online prices found (lowest / middle / highest).
+function onlineBand(results) {
+  const ps = (results || []).map(r => r.price).sort((a, b) => a - b);
+  if (!ps.length) return null;
+  return { low: ps[0], typical: ps[Math.floor((ps.length - 1) / 2)], high: ps[ps.length - 1], from: 'online' };
 }
 function onlineLine(results, quoted) {
   // Use the lowest RETAIL price (one piece a customer can buy); a wholesale price is only used if nothing else was found.
@@ -290,15 +330,25 @@ function searchQueryFor(d, refId, text, brand) {
 }
 
 app.post('/api/parts-prices', async (req, res) => {
-  const { query = '', alt = '', ref_id = '', quoted, lang = 'en' } = req.body || {};
+  const { query = '', alt = '', ref_id = '', quoted, qty, need_band = false, part_name = '', lang = 'en' } = req.body || {};
+  const hi = lang === 'hi';
   const q = String(query).slice(0, 80);
-  if (!q.trim()) return res.status(400).json({ error: lang === 'hi' ? 'पार्ट का नाम चाहिए।' : 'Part name is needed.' });
-  try {
-    const r = await onlinePrices(q, ref_id, String(alt).slice(0, 80));
-    res.json({ ...r, online_line: onlineLine(r.results, posInt(quoted, 0)), message: r.found ? null : (lang === 'hi' ? 'ऑनलाइन दाम नहीं मिले – अनुमान दिखा रहे हैं।' : 'No live prices found, showing estimate.') });
-  } catch (e) {
-    res.json({ query: q, found: false, results: [], sources: [], message: lang === 'hi' ? 'ऑनलाइन दाम नहीं मिले – अनुमान दिखा रहे हैं।' : 'No live prices found, showing estimate.' });
+  if (!q.trim()) return res.status(400).json({ error: hi ? 'पार्ट का नाम चाहिए।' : 'Part name is needed.' });
+  const none = hi ? 'ऑनलाइन दाम अभी नहीं मिले। नीचे के लिंक से खुद खोजें।' : 'No live prices found right now. Use the links below to search yourself.';
+  let r;
+  try { r = await onlinePrices(q, ref_id, String(alt).slice(0, 80)); }
+  catch (e) { r = { query: q, found: false, results: [], sources: [], open_links: pricesearch.openLinks(q) }; }
+  const out = { ...r, open_links: r.open_links || pricesearch.openLinks(q), online_line: onlineLine(r.results, posInt(quoted, 0)), message: r.found ? null : none };
+  // No reference band for this part → judge the pro's price against the real online prices instead.
+  if (need_band && r.found) {
+    const b = onlineBand(r.results), n = posInt(qty, 1), qn = posInt(quoted, 0);
+    const v = parts.verdict(qn, b, n);
+    const name = nameOf(ref_id, part_name || q);
+    out.online_band = b;
+    out.online_verdict = v;
+    out.bargain_lines = parts.templateLines(name, v ? v.fair_offer : parts.r10(b.typical * n * 1.1), v && v.verdict !== 'fair' ? qn : 0);
   }
+  res.json(out);
 });
 
 function nameOf(refId, fallbackName) {
@@ -320,7 +370,7 @@ app.post('/api/parts-check', async (req, res) => {
   if (mode === 'bill') {
     if (!image) return res.status(400).json({ error: hi ? 'बिल की फ़ोटो लगाएँ।' : 'Please add a photo of the bill.' });
     let g;
-    try { g = await callGemini({ parts: [...imgPart, { text: cleanText ? `Customer note: ${cleanText}` : 'Read this bill.' }], schema: billSchema, system: billSystem(lang), prefer: FAST_MODEL }); }
+    try { g = await callGemini({ parts: [...imgPart, { text: cleanText ? `Customer note: ${cleanText}` : 'Read this bill.' }], schema: billSchema, system: billSystem(lang), chain: FAST_CHAIN, deadlineMs: 45000 }); }
     catch (e) {
       return res.json({ mode, source: 'fallback', note: hi ? 'AI अभी बिल नहीं पढ़ पाया। हर पार्ट का नाम और रेट "एक पार्ट" में लिखकर जाँचें।' : 'AI could not read the bill right now. Type each part and its price in "One part" mode.', items: [], total_savings: 0, checklist: parts.CHECKLIST[hi ? 'hi' : 'en'] });
     }
@@ -341,55 +391,83 @@ app.post('/api/parts-check', async (req, res) => {
   }
 
   // Single part (typed and/or photo)
+  const busyNote = e => String(e.message) === 'NO_KEY' ? (hi ? 'AI key नहीं है – Martigence रेफ़रेंस टेबल से अनुमान।' : 'AI key not set – estimate from the Martigence reference table.') : (hi ? 'Gemini अभी व्यस्त है – Martigence रेफ़रेंस टेबल और ऑनलाइन दाम से जवाब।' : 'Gemini is busy right now – answer from the Martigence reference table and live online prices.');
+  const textNoPrice = cleanText.replace(/(?:₹|rs\.?|rupees?|रु\.?|रुपये)\s*[0-9][0-9,]*|[0-9][0-9,]*\s*(?:₹|rs\.?|rupees?|रुपये|रु)\b/gi, ' ').replace(/\s+/g, ' ').trim();
+  let idf = null;
+  // Step 1 (photo only): a small, fast call that just names the part. Longer timeout, every model in the chain.
+  if (image) {
+    try {
+      const r = await callGemini({ parts: [...imgPart, { text: `Name the household repair part or product in this photo.${textNoPrice ? ` Customer says: "${textNoPrice}"` : ''}` }], schema: identifySchema, chain: FAST_CHAIN, deadlineMs: 40000,
+        system: `You identify household electrical/plumbing/appliance parts in photos for an Indian price checker. Return ONLY the JSON. ref_id: closest from this list or "none":\n${parts.PART_IDS.join(', ')}` });
+      idf = r.data; model = r.model;
+    } catch (e) { source = 'fallback'; note = busyNote(e); }
+  }
+  const nameEn = String(idf && idf.part_name_en || '').slice(0, 80);
+  const ask = `Part: "${textNoPrice || nameEn || '(unknown)'}"${nameEn && textNoPrice ? `\nPhoto shows: ${nameEn}` : ''}${cleanBrand ? `\nBrand: ${cleanBrand}` : ''}${+quoted > 0 ? `\nPro asked: ₹${+quoted}` : ''}${+qty > 0 ? `\nQuantity: ${+qty}` : ''}`;
+  // Photo with no name and no text → nothing to search. Ask the customer to type it, with quick-pick chips (no dead end).
+  if (!textNoPrice && !nameEn) {
+    return res.json({ mode, source: 'fallback', model: null, note, found: false, need_name: true,
+      message: hi ? 'फ़ोटो से पार्ट पहचान नहीं पाए। पार्ट का नाम लिखें या नीचे से चुनें – हम ऑनलाइन दाम ढूँढ देंगे।' : 'We could not read the part from the photo right now. Type the part name or tap one below – we will find live online prices.',
+      quick: parts.QUICK.map(k => ({ id: k, en: parts.PARTS[k].en.replace(/\s*\(.*?\)/g, ''), hi: parts.PARTS[k].hi.replace(/\s*\(.*?\)/g, '') })),
+      checklist: parts.CHECKLIST[hi ? 'hi' : 'en'] });
+  }
+  // Step 2: details (band, tips, bargain lines) as a TEXT-only call – fast. On failure we still continue.
   let g = null;
   try {
-    const ask = `Part: "${cleanText || '(see photo)'}"${cleanBrand ? `\nBrand: ${cleanBrand}` : ''}${+quoted > 0 ? `\nPro asked: ₹${+quoted}` : ''}${+qty > 0 ? `\nQuantity: ${+qty}` : ''}`;
-    g = await callGemini({ parts: [...imgPart, { text: ask }], schema: partSchema, system: partsSystem(lang), prefer: FAST_MODEL });
-    model = g.model;
+    g = await callGemini({ parts: [{ text: ask }], schema: partSchema, system: partsSystem(lang), chain: FAST_CHAIN, deadlineMs: 20000 });
+    if (!model) model = g.model;
   } catch (e) {
-    source = 'fallback';
-    note = String(e.message) === 'NO_KEY' ? (hi ? 'AI key नहीं है – Martigence रेफ़रेंस टेबल से अनुमान।' : 'AI key not set – estimate from the Martigence reference table.') : (hi ? 'Gemini व्यस्त है – Martigence रेफ़रेंस टेबल से अनुमान।' : 'Gemini is busy – estimate from the Martigence reference table.');
+    if (source !== 'fallback') { source = image && idf ? 'gemini' : 'fallback'; note = image && idf ? null : busyNote(e); }
   }
   const d = g ? g.data : {};
-  const textRef = parts.findPart(`${cleanText} ${cleanBrand}`);
-  const refId = parts.PARTS[d.ref_id] ? d.ref_id : textRef;
+  if (idf && !d.search_query) d.search_query = idf.search_query;
+  if (idf && !d.photo_seen) d.photo_seen = idf.photo_seen || '';
+  if (idf && !d.part_name) d.part_name = hi ? '' : nameEn;
+  const textRef = parts.findPart(`${textNoPrice} ${cleanBrand} ${nameEn}`);
+  const refId = parts.PARTS[d.ref_id] ? d.ref_id : (idf && parts.PARTS[idf.ref_id] ? idf.ref_id : textRef);
   const b = parts.band(refId, d);
-  if (!b) {
-    return res.json({ mode, source, model, note, found: false, part_name: d.part_name || cleanText, message: hi ? 'यह पार्ट हमारी सूची में नहीं है। प्रो से डिब्बे पर MRP और बिल माँगें।' : 'This part is not in our list yet. Ask the pro to show the MRP on the box and give a bill.', bargain_lines: parts.templateLines({ en: cleanText || 'part', hi: cleanText || 'पार्ट' }, 0, 0).filter((_, i) => i !== 1), checklist: parts.CHECKLIST[hi ? 'hi' : 'en'] });
-  }
   const q = posInt(qty, posInt(d.quantity, 1));
   const quotedN = posInt(quoted, 0) || posInt(d.quoted_in_text, 0) || parts.priceFromText(cleanText);
-  const v = parts.verdict(quotedN, b, q);
-  const fairOffer = v ? v.fair_offer : parts.r10(b.typical * q * 1.1);
+  const v = b ? parts.verdict(quotedN, b, q) : null;
+  const fairOffer = b ? (v ? v.fair_offer : parts.r10(b.typical * q * 1.1)) : 0;
   const ref = parts.PARTS[refId];
-  const name = ref ? { en: ref.en, hi: ref.hi } : nameOf(null, d.part_name || cleanText);
+  const name = ref ? { en: ref.en, hi: ref.hi } : nameOf(null, d.part_name || nameEn || textNoPrice);
   // Gemini lines are used only if they follow the {FAIR} placeholder rule; any other rupee figure → safe templates.
-  let lines = Array.isArray(d.bargain_lines) && d.bargain_lines.length >= 3 ? d.bargain_lines.slice(0, 3) : null;
+  let lines = b && Array.isArray(d.bargain_lines) && d.bargain_lines.length >= 3 ? d.bargain_lines.slice(0, 3) : null;
   const bad = l => /₹\s?\d|\d{3,}\s?(rs|rupe|रुप)/i.test(`${l.hi} ${l.hinglish} ${l.en}`);
   if (lines && lines.some(bad)) lines = null;
   if (lines) lines = lines.map(l => Object.fromEntries(['hi', 'hinglish', 'en'].map(k => [k, String(l[k] || '').replace(/₹\s?\{FAIR\}/g, `₹${fairOffer}`).replace(/\{FAIR\}/g, `₹${fairOffer}`).slice(0, 220)])));
   const linesSource = lines ? 'gemini' : 'template';
-  if (!lines) lines = parts.templateLines(name, fairOffer, v && v.verdict !== 'fair' ? quotedN : 0);
-  const search_query = searchQueryFor(d, refId, cleanText, cleanBrand);
-  const search_alt = /[^\x00-\x7F]/.test(cleanText) ? '' : `${cleanBrand} ${cleanText}`.trim().slice(0, 80);
-  let online = null;
-  if (with_prices && search_query) {
-    try { online = await onlinePrices(search_query, refId, search_alt); } catch (_) { online = { found: false, results: [], sources: [] }; }
-    const ol = onlineLine(online.results, v && v.verdict !== 'fair' ? quotedN : 0);
-    if (ol) lines = [ol, ...lines];
-    if (!online.found) online.message = hi ? 'ऑनलाइन दाम नहीं मिले – अनुमान दिखा रहे हैं।' : 'No live prices found, showing estimate.';
-  }
-  res.json({
+  if (!lines) lines = b ? parts.templateLines(name, fairOffer, v && v.verdict !== 'fair' ? quotedN : 0) : parts.templateLines(name, 0, 0).filter((_, i) => i !== 1);
+  const search_query = searchQueryFor(d, refId, textNoPrice, cleanBrand);
+  const search_alt = /[^\x00-\x7F]/.test(textNoPrice) ? '' : `${cleanBrand} ${textNoPrice}`.trim().slice(0, 80);
+  const out = {
     mode, source, model, note, found: true,
     part_name: d.part_name || (hi ? name.hi : name.en), ref_id: refId || 'none', ref_name: ref ? (hi ? ref.hi : ref.en) : null,
     unit: ref && (hi ? ref.unit_hi : ref.unit_en) || null,
     photo_seen: d.photo_seen || '', brand: cleanBrand,
     common_brands: (d.common_brands && d.common_brands.length ? d.common_brands : (ref ? ref.brands : [])).slice(0, 4),
-    band: b, qty: q, quoted: quotedN || null, ...(v || {}), fair_offer: fairOffer, margin_pct: parts.MARGIN * 100,
+    band: b, need_band: !b, qty: q, quoted: quotedN || null, ...(v || {}), fair_offer: fairOffer || null, margin_pct: parts.MARGIN * 100,
     tip: d.tip || null, confidence: d.confidence || (ref ? 'medium' : 'low'),
-    search_query, search_alt, online,
+    search_query, search_alt, open_links: pricesearch.openLinks(search_query || textNoPrice || nameEn),
+    message: b ? null : (hi ? 'यह पार्ट हमारी सूची में नहीं है – ऑनलाइन दाम से जाँच रहे हैं।' : 'This part is not in our table yet – checking live online prices instead.'),
     bargain_lines: lines, lines_source: linesSource, checklist: parts.CHECKLIST[hi ? 'hi' : 'en'],
-  });
+  };
+  // with_prices: do the online search in the same request (used by scripts/tests; the web page calls /api/parts-prices).
+  if (with_prices && search_query) {
+    let online;
+    try { online = await onlinePrices(search_query, refId, search_alt); } catch (_) { online = { found: false, results: [], sources: [] }; }
+    online.open_links = online.open_links || pricesearch.openLinks(search_query);
+    const ol = onlineLine(online.results, v && v.verdict !== 'fair' ? quotedN : 0);
+    if (ol) out.bargain_lines = [ol, ...out.bargain_lines];
+    if (!b && online.found) {
+      const ob = onlineBand(online.results), ov = parts.verdict(quotedN, ob, q);
+      Object.assign(out, { band: ob, ...(ov || {}), fair_offer: ov ? ov.fair_offer : parts.r10(ob.typical * q * 1.1) });
+    }
+    if (!online.found) online.message = hi ? 'ऑनलाइन दाम अभी नहीं मिले। नीचे के लिंक से खुद खोजें।' : 'No live prices found right now. Use the links below to search yourself.';
+    out.online = online;
+  }
+  res.json(out);
 });
 
 if (require.main === module) {

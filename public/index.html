@@ -262,8 +262,9 @@ if(pmode==='part'&&!text&&!pImg){$('pErr').textContent=t('pEmpty');$('pErr').cla
 const b=$('pBtn');busy(b,true);pOnline=null;
 try{const j=await api('/api/parts-check',{mode:pmode,text:pmode==='part'?text:'',brand:$('pBrand').value.trim(),quoted:$('pQuote').value,image:pImg,mime:'image/jpeg',lang});pLast=j;pScript=lang==='hi'?'hi':'en';pRender();$('pRes').scrollIntoView({behavior:'smooth'});
 if(j.mode==='part'&&j.found&&j.search_query){pOnline='loading';pRender();
-try{pOnline=await api('/api/parts-prices',{query:j.search_query,alt:j.search_alt||'',ref_id:j.ref_id,quoted:j.verdict&&j.verdict!=='fair'?j.quoted:0,lang})}catch(e){pOnline={found:false,results:[],sources:[]}}pRender()}}
+try{pOnline=await api('/api/parts-prices',{query:j.search_query,alt:j.search_alt||'',ref_id:j.ref_id,quoted:j.need_band?(j.quoted||$('pQuote').value):(j.verdict&&j.verdict!=='fair'?j.quoted:0),qty:j.qty,need_band:!!j.need_band,part_name:j.part_name,lang});if(pOnline.online_band){Object.assign(pLast,{band:pOnline.online_band,...(pOnline.online_verdict||{}),bargain_lines:pOnline.bargain_lines||pLast.bargain_lines,message:null})}}catch(e){pOnline={found:false,results:[],sources:[],open_links:j.open_links}}pRender()}}
 catch(e){$('pErr').textContent=e.message&&e.message!=='error'?e.message:t('fail');$('pErr').classList.remove('hidden')}finally{busy(b,false,'pGo')}}
+function pPick(btn){pClearPhoto();$('pText').value=btn.dataset.n;partsCheck()}
 function pLines(){const j=pLast;let L=(j.bargain_lines||[]).slice();if(pOnline&&pOnline.online_line)L=[pOnline.online_line,...L];return L}
 function pText(){return pLines().map(l=>l[pScript]||l.en).join('\n')}
 function pCopy(btn){const s=pText();(navigator.clipboard?navigator.clipboard.writeText(s):Promise.reject()).catch(()=>{const a=document.createElement('textarea');a.value=s;document.body.appendChild(a);a.select();document.execCommand('copy');a.remove()}).finally(()=>{btn.textContent=t('copied');setTimeout(()=>btn.textContent=t('copy'),1800)})}
@@ -275,11 +276,12 @@ h+=`<table class="bill"><thead><tr><th scope="col">${t('item')}</th><th scope="c
 for(const it of j.items){const v=it.verdict;h+=`<tr><td>${esc(it.name)}${v?`<br><span class="flag v-${v}">${t('pv_'+v)}${it.savings?` +${inr(it.price-it.typical_total)}`:''}</span>`:`<br><span class="muted">${it.kind==='labour'?t('labourLine'):''}</span>`}</td><td class="r">${it.qty}</td><td class="r">${inr(it.price)}</td><td class="r">${v?inr(it.fair_max):'–'}</td></tr>`}
 h+=`</tbody></table>`;h+=j.total_savings>0?`<div class="save">💰 ${t('savings')} ${inr(j.total_savings)}</div>`:`<div class="verdict v-fair">${t('noSave')}</div>`;
 h+=`<p class="src">${t('estNote').replace('{m}',j.margin_pct)}</p></div>`}}
-else if(!j.found){h+=`<div class="note">${esc(j.message)}</div>`}
+else if(!j.found){h+=`<div class="note">${esc(j.message)}</div>`;if(j.quick)h+=`<div class="chips" style="display:flex;flex-wrap:wrap;gap:8px;margin-top:10px">${j.quick.map(x=>`<button class="chip" onclick="pPick(this)" data-n="${esc(x.en)}">${esc(lang==='hi'?x.hi:x.en)}</button>`).join('')}</div>`}
 else{h+=`<p><b>${esc(j.part_name)}</b>${j.ref_name&&j.ref_name!==j.part_name?` <span class="muted">(${esc(j.ref_name)})</span>`:''}${j.qty>1?` × ${j.qty}`:''}${j.unit?` <span class="muted">${esc(j.unit)}</span>`:''}</p>`;
 if(j.photo_seen)h+=`<p class="muted"><b>${t('seen')}:</b> ${esc(j.photo_seen)}</p>`;
 if(j.verdict)h+=`<div class="verdict v-${j.verdict}">${t('pv_'+j.verdict)} – ${inr(j.quoted)}${j.diff>0?` (+${inr(j.diff)} ${t('vsTyp')})`:''}</div>`;
-h+=`<div class="band3"><div>${t('low')}<b>${inr(j.band.low*j.qty)}</b></div><div class="mid">${t('typical')}<b>${inr(j.band.typical*j.qty)}</b></div><div>${t('high')}<b>${inr(j.band.high*j.qty)}</b></div></div>`;
+if(j.message)h+=`<div class="note">${esc(j.message)}</div>`;
+if(j.band)h+=`<div class="band3"><div>${t('low')}<b>${inr(j.band.low*j.qty)}</b></div><div class="mid">${t('typical')}<b>${inr(j.band.typical*j.qty)}</b></div><div>${t('high')}<b>${inr(j.band.high*j.qty)}</b></div></div>`;
 h+=`<p class="src" style="margin-top:0">${t('estNote').replace('{m}',j.margin_pct)}</p>`;
 if(j.common_brands&&j.common_brands.length)h+=`<p><b>${t('brands')}:</b> ${j.common_brands.map(esc).join(', ')}</p>`;
 if(j.tip)h+=`<div class="safety calm">💡 <b>${t('tip')}:</b> ${esc(j.tip)}</div>`;
@@ -287,6 +289,7 @@ h+=`<div class="sub" aria-live="polite"><h3>${t('onlineT')}</h3>`;
 if(pOnline==='loading')h+=`<p class="muted"><span class="spinner" style="border-color:rgba(19,112,79,.3);border-top-color:#13704f"></span>${t('onlineWait')}</p>`;
 else if(pOnline&&pOnline.found){h+=pOnline.results.map((r,i)=>`<div class="offer"><span class="rank">${i+1}</span><div><b>${esc(r.store)}</b>${r.retail?'':` <span class="sample">${t('wholesale')}</span>`}<div class="muted" style="font-size:.85rem">${esc(r.title)}</div><a href="${esc(r.url)}" target="_blank" rel="noopener nofollow">${t('view')} ↗</a></div><span class="op">${inr(r.price)}</span></div>`).join('');
 h+=`<p class="src">${t('onlineNote')}<br>${t('onlineSrc')}: ${pOnline.sources.map(s=>`<a href="${esc(s.url)}" target="_blank" rel="noopener nofollow">${esc(s.store)}</a> (${s.listings})`).join(' · ')}</p>`}
+else if(pOnline&&!pOnline.found&&(pOnline.open_links||j.open_links))h+=`<p>${(pOnline.open_links||j.open_links).map(l=>`<a class="chip" style="display:inline-block;margin:4px" href="${esc(l.url)}" target="_blank" rel="noopener nofollow">🔎 ${esc(l.store)}</a>`).join('')}</p>`;
 else if(pOnline)h+=`<p>${t('onlineNone')}</p>${pOnline.sources&&pOnline.sources.length?`<p class="src">${t('onlineSrc')}: ${pOnline.sources.map(s=>esc(s.store)+' ('+s.listings+')').join(' · ')}</p>`:''}`;
 h+=`</div>`}
 const L=pLast.bargain_lines?pLines():[];
