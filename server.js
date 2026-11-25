@@ -1,6 +1,7 @@
 // Martigence – Dikhao aur Jano (Buildathon upgrade)
 // Gemini is called ONLY here on the server. The API key never reaches the browser.
 const path = require('path');
+const crypto = require('crypto');
 const fs = require('fs');
 const express = require('express');
 const dotenv = require('dotenv');
@@ -16,7 +17,8 @@ const ENV_PATHS = [
 const PORT = process.env.PORT || 8080;
 // gemini-2.5-flash / 2.5-flash-lite are closed to new API keys (404), so newer free Flash models are used. Override with GEMINI_MODEL in .env.
 // Measured on this key (20 Nov): 3.5-flash-lite ~1 s, 3.1-flash-lite ~1.3 s, 3.8-flash ~6-16 s. 3.5-flash often 503 (overloaded).
-const DEFAULT_MODELS = ['gemini-3.8-flash', 'gemini-3.5-flash-lite', 'gemini-3.1-flash-lite'];
+// 25 Nov: Flash-Lite first (fast, higher free daily cap), then 3.8-flash, then 3.1-flash-lite, then the rule-based fallback.
+const DEFAULT_MODELS = ['gemini-3.5-flash-lite', 'gemini-3.8-flash', 'gemini-3.1-flash-lite'];
 // Parts checks need a quick answer in a live demo, so they use the fast Flash-Lite chain first.
 const FAST_MODEL = 'gemini-3.5-flash-lite';
 const FAST_CHAIN = ['gemini-3.5-flash-lite', 'gemini-3.1-flash-lite', 'gemini-3.8-flash'];
@@ -147,16 +149,66 @@ const quoteSchema = {
 };
 
 const app = express();
+app.set('trust proxy', true);
 app.use(express.json({ limit: '8mb' }));
 app.use(express.static(path.join(__dirname, 'public')));
 
+// ---------- Safeguards (25 Nov) ----------
+// 1) Shared secret: when MARTIGENCE_PROXY_KEY is set, the AI endpoints need the header x-martigence-key
+//    (martigence.com calls from its server). This app's own page (same origin) keeps working.
+//    If MARTIGENCE_PROXY_KEY is NOT set, everything works exactly as before.
+// 2) Per-IP rate limit in memory (best effort; each serverless instance keeps its own counts).
+function proxyKey() {
+  return (process.env.MARTIGENCE_PROXY_KEY || readEnv().MARTIGENCE_PROXY_KEY || '').trim();
+}
+function keyMatches(given, want) {
+  const a = Buffer.from(String(given || '')), b = Buffer.from(want);
+  return a.length === b.length && crypto.timingSafeEqual(a, b);
+}
+function sameOrigin(req) {
+  if (req.get('sec-fetch-site') === 'same-origin') return true;
+  const o = req.get('origin');
+  if (!o) return false;
+  try { return new URL(o).host === req.get('host'); } catch (_) { return false; }
+}
+const RL_WINDOW_MS = 10 * 60 * 1000;
+const RL_MAX = 10;            // per visitor IP, per endpoint group, per 10 minutes
+const RL_MAX_SHARED = 120;    // keyed caller that did not forward the visitor IP
+const hits = new Map();
+function rateLimited(bucket, max) {
+  const now = Date.now();
+  if (hits.size > 5000) for (const [k, v] of hits) if (now - v.start > RL_WINDOW_MS) hits.delete(k);
+  let h = hits.get(bucket);
+  if (!h || now - h.start > RL_WINDOW_MS) { h = { start: now, n: 0 }; hits.set(bucket, h); }
+  h.n += 1;
+  return h.n > max ? Math.ceil((h.start + RL_WINDOW_MS - now) / 1000) : 0;
+}
+function guard(group) {
+  return (req, res, next) => {
+    const want = proxyKey();
+    const keyed = want && keyMatches(req.get('x-martigence-key'), want);
+    if (want && !keyed && !sameOrigin(req)) return res.status(401).json({ error: 'Not allowed.' });
+    let ip = req.ip || 'unknown', max = RL_MAX;
+    if (keyed) {
+      const fwd = String(req.get('x-client-ip') || '').trim().slice(0, 64);
+      if (fwd) ip = 'mtg:' + fwd; else { ip = 'mtg-shared'; max = RL_MAX_SHARED; }
+    }
+    const wait = rateLimited(group + '|' + ip, max);
+    if (wait) {
+      res.set('Retry-After', String(wait));
+      return res.status(429).json({ error: 'Too many checks. Please try again in a few minutes.', retry_after: wait });
+    }
+    next();
+  };
+}
+
 app.get('/api/health', (req, res) => {
-  res.json({ ok: true, gemini_key_present: !!getKey(), last_model: lastGoodModel, time: new Date().toISOString() });
+  res.json({ ok: true, gemini_key_present: !!getKey(), proxy_key_required: !!proxyKey(), time: new Date().toISOString() });
 });
 
 app.get('/api/jobs', (req, res) => res.json({ categories: CATEGORIES, jobs: rules.JOBS }));
 
-app.post('/api/diagnose', async (req, res) => {
+app.post('/api/diagnose', guard('diagnose'), async (req, res) => {
   const { text = '', image, mime, lang = 'en' } = req.body || {};
   const cleanText = String(text).slice(0, 1500);
   if (!cleanText.trim() && !image) return res.status(400).json({ error: 'Please type the problem or add a photo.' });
@@ -177,7 +229,7 @@ app.post('/api/diagnose', async (req, res) => {
   res.json({ source, model, note, result, visit_fee: rules.VISIT_FEE });
 });
 
-app.post('/api/check-quote', async (req, res) => {
+app.post('/api/check-quote', guard('diagnose'), async (req, res) => {
   const { quote, labour_min, labour_max, parts_min, parts_max, problem = '', lang = 'en' } = req.body || {};
   const q = Number(quote);
   if (!q || q <= 0) return res.status(400).json({ error: 'Please enter the amount the pro asked for.' });
@@ -329,7 +381,7 @@ function searchQueryFor(d, refId, text, brand) {
   return q.replace(/\s+/g, ' ').trim();
 }
 
-app.post('/api/parts-prices', async (req, res) => {
+app.post('/api/parts-prices', guard('prices'), async (req, res) => {
   const { query = '', alt = '', ref_id = '', quoted, qty, need_band = false, part_name = '', lang = 'en' } = req.body || {};
   const hi = lang === 'hi';
   const q = String(query).slice(0, 80);
@@ -358,7 +410,7 @@ function nameOf(refId, fallbackName) {
   return { en: n, hi: n };
 }
 
-app.post('/api/parts-check', async (req, res) => {
+app.post('/api/parts-check', guard('parts'), async (req, res) => {
   const { mode = 'part', text = '', brand = '', quoted, qty, image, mime, lang = 'en', with_prices = false } = req.body || {};
   const hi = lang === 'hi';
   const cleanText = String(text).slice(0, 600);
