@@ -39,7 +39,7 @@ flowchart LR
 - `POST /api/diagnose` `{text?, image? (dataURL/base64), mime?, lang:'en'|'hi'}` → `{source:'gemini'|'fallback', model, note, result{problem, category, job_key, urgency, urgency_reason, safety_tip, labour_min/max, parts_min/max, parts_list, pro_should_check, questions_for_customer, confidence, photo_seen, guard_triggered}}`
 - `POST /api/check-quote` `{quote, labour_min/max, parts_min/max, problem, lang}` → `{verdict: fair|slightly_high|too_high|suspiciously_low, diff, band_total, reason, questions_to_ask_pro, above_band_rule}`. The **verdict always comes from the transparent rules**. Gemini writes the reason and the questions.
 - `POST /api/match` `{category}` → top 3 sample pros with their score breakdown.
-- `GET /api/health` → whether a key is present and the last working model (never shows the key).
+- `GET /api/health` → whether a Gemini key is present and whether the proxy key is required (never shows any key). Per-IP and daily AI caps are enforced in `server.js` (in memory, best effort).
 
 ## Trust and safety design
 - **AI proposes, rules decide.** Urgency guards can only raise urgency, never lower it. Price bands are clamped to the rate card. The quote verdict is pure arithmetic.

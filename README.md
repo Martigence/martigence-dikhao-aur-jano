@@ -52,7 +52,7 @@ Gemini is used as a structured diagnostician, not as a free-form chatbot. The of
 | What | How |
 | --- | --- |
 | Models | `gemini-3.5-flash-lite` first (fast, higher free daily cap), then `gemini-3.8-flash` (thinking level `LOW`, 16s timeout), then `gemini-3.1-flash-lite`, then the rule-based fallback. The last model that worked is tried first on the next request. Override with `GEMINI_MODEL` in `.env`. (`gemini-2.5-flash` returns 404 for new API keys, so it is not in the chain.) |
-| Safeguards | Optional `MARTIGENCE_PROXY_KEY`: when set, `/api/diagnose`, `/api/check-quote`, `/api/parts-check` and `/api/parts-prices` need the `x-martigence-key` header (used by martigence.com's server); this app's own page keeps working. Per-IP limit of 10 requests per 10 minutes per endpoint group (in memory, best effort). |
+| Safeguards | The proxy key is optional (Grok Build has no Secrets field). Calls without `x-martigence-key` are allowed unless `MARTIGENCE_REQUIRE_PROXY_KEY=1` and `MARTIGENCE_PROXY_KEY` are both set. Per-IP limit of 10 requests per 10 minutes per endpoint group; `x-client-ip` is trusted when present. Global cap of 300 AI calls per endpoint group per IST day (in memory, best effort); over the cap the app uses built-in rules. |
 | Structured output | `responseMimeType: application/json` plus a `responseSchema` with enums for `category`, `job_key`, `urgency` and `confidence`. Temperature is `0.2`. |
 | Image input | If the customer attaches a photo, it is sent as multimodal `inlineData` (JPEG) alongside the text. The model fills `photo_seen`. |
 | Languages | The system instruction asks for simple Hindi (Devanagari) or simple English, matching the UI language. |

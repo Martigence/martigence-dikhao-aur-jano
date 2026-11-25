@@ -3,6 +3,7 @@
 const path = require('path');
 const crypto = require('crypto');
 const fs = require('fs');
+const { AsyncLocalStorage } = require('async_hooks');
 const express = require('express');
 const dotenv = require('dotenv');
 const { GoogleGenAI, Type } = require('@google/genai');
@@ -54,6 +55,7 @@ async function callGemini({ parts, schema, system, prefer, chain, deadlineMs = 3
   if ((process.env.GEMINI_DISABLE || env.GEMINI_DISABLE) === '1') throw new Error('DISABLED'); // test switch: simulate Gemini down
   const key = getKey();
   if (!key) throw new Error('NO_KEY');
+  if (!takeGlobalAiSlot()) throw new Error('DAILY_CAP');
   const ai = new GoogleGenAI({ apiKey: key });
   let MODELS = chain || DEFAULT_MODELS;
   const forced = process.env.GEMINI_MODEL || env.GEMINI_MODEL;
@@ -153,13 +155,23 @@ app.set('trust proxy', true);
 app.use(express.json({ limit: '8mb' }));
 app.use(express.static(path.join(__dirname, 'public')));
 
-// ---------- Safeguards (25 Nov) ----------
-// 1) Shared secret: when MARTIGENCE_PROXY_KEY is set, the AI endpoints need the header x-martigence-key
-//    (martigence.com calls from its server). This app's own page (same origin) keeps working.
-//    If MARTIGENCE_PROXY_KEY is NOT set, everything works exactly as before.
+// ---------- Safeguards (25 Nov, updated same day) ----------
+// 1) Shared secret is OPTIONAL. Grok Build (martigence.com) has no Secrets field, so
+//    MARTIGENCE_REQUIRE_PROXY_KEY is left unset and calls without x-martigence-key are allowed.
+//    To turn the key back on later: set MARTIGENCE_PROXY_KEY and MARTIGENCE_REQUIRE_PROXY_KEY=1.
+//    This app's own page (same origin) always keeps working.
 // 2) Per-IP rate limit in memory (best effort; each serverless instance keeps its own counts).
+//    x-client-ip is trusted when present (spoofable; only risks the free Gemini quota, not money).
+// 3) Global cap per endpoint group: 300 AI calls per IST day, in memory, best effort.
+//    Over the cap, callGemini throws DAILY_CAP and handlers use built-in rules (or a clear 429
+//    if that path has no useful fallback).
+const requestContext = new AsyncLocalStorage();
 function proxyKey() {
   return (process.env.MARTIGENCE_PROXY_KEY || readEnv().MARTIGENCE_PROXY_KEY || '').trim();
+}
+function requireProxyKey() {
+  const flag = (process.env.MARTIGENCE_REQUIRE_PROXY_KEY || readEnv().MARTIGENCE_REQUIRE_PROXY_KEY || '').trim();
+  return flag === '1' && !!proxyKey();
 }
 function keyMatches(given, want) {
   const a = Buffer.from(String(given || '')), b = Buffer.from(want);
@@ -173,8 +185,13 @@ function sameOrigin(req) {
 }
 const RL_WINDOW_MS = 10 * 60 * 1000;
 const RL_MAX = 10;            // per visitor IP, per endpoint group, per 10 minutes
-const RL_MAX_SHARED = 120;    // keyed caller that did not forward the visitor IP
+const RL_MAX_SHARED = 120;    // caller that did not forward the visitor IP
+const GLOBAL_AI_MAX = Math.max(1, Number(process.env.MARTIGENCE_GLOBAL_AI_MAX || 300) || 300); // AI calls per endpoint group per IST day
 const hits = new Map();
+const globalHits = new Map();
+function istDay() {
+  return new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Kolkata' });
+}
 function rateLimited(bucket, max) {
   const now = Date.now();
   if (hits.size > 5000) for (const [k, v] of hits) if (now - v.start > RL_WINDOW_MS) hits.delete(k);
@@ -183,27 +200,37 @@ function rateLimited(bucket, max) {
   h.n += 1;
   return h.n > max ? Math.ceil((h.start + RL_WINDOW_MS - now) / 1000) : 0;
 }
+function takeGlobalAiSlot() {
+  const group = (requestContext.getStore() || {}).group || 'ai';
+  const day = istDay();
+  const key = group + '|' + day;
+  if (globalHits.size > 20) for (const k of globalHits.keys()) if (!k.endsWith('|' + day)) globalHits.delete(k);
+  const n = globalHits.get(key) || 0;
+  if (n >= GLOBAL_AI_MAX) return false;
+  globalHits.set(key, n + 1);
+  return true;
+}
 function guard(group) {
   return (req, res, next) => {
     const want = proxyKey();
+    const mustKey = requireProxyKey();
     const keyed = want && keyMatches(req.get('x-martigence-key'), want);
-    if (want && !keyed && !sameOrigin(req)) return res.status(401).json({ error: 'Not allowed.' });
+    if (mustKey && !keyed && !sameOrigin(req)) return res.status(401).json({ error: 'Not allowed.' });
     let ip = req.ip || 'unknown', max = RL_MAX;
-    if (keyed) {
-      const fwd = String(req.get('x-client-ip') || '').trim().slice(0, 64);
-      if (fwd) ip = 'mtg:' + fwd; else { ip = 'mtg-shared'; max = RL_MAX_SHARED; }
-    }
+    const fwd = String(req.get('x-client-ip') || '').trim().slice(0, 64);
+    if (fwd) ip = 'mtg:' + fwd;
+    else if (keyed) { ip = 'mtg-shared'; max = RL_MAX_SHARED; }
     const wait = rateLimited(group + '|' + ip, max);
     if (wait) {
       res.set('Retry-After', String(wait));
       return res.status(429).json({ error: 'Too many checks. Please try again in a few minutes.', retry_after: wait });
     }
-    next();
+    requestContext.run({ group }, () => next());
   };
 }
 
 app.get('/api/health', (req, res) => {
-  res.json({ ok: true, gemini_key_present: !!getKey(), proxy_key_required: !!proxyKey(), time: new Date().toISOString() });
+  res.json({ ok: true, gemini_key_present: !!getKey(), proxy_key_required: requireProxyKey(), time: new Date().toISOString() });
 });
 
 app.get('/api/jobs', (req, res) => res.json({ categories: CATEGORIES, jobs: rules.JOBS }));
@@ -221,7 +248,7 @@ app.post('/api/diagnose', guard('diagnose'), async (req, res) => {
     result = g.data; model = g.model;
   } catch (e) {
     source = 'fallback';
-    note = String(e.message) === 'NO_KEY' ? 'AI key not set – showing rule-based estimate.' : 'Gemini is busy – showing rule-based estimate.';
+    note = String(e.message) === 'NO_KEY' ? 'AI key not set – showing rule-based estimate.' : (String(e.message) === 'DAILY_CAP' ? 'Daily AI limit reached – showing rule-based estimate.' : 'Gemini is busy – showing rule-based estimate.');
     result = rules.fallbackDiagnose(cleanText, lang);
   }
   // Safety + business rules are enforced in code, not left to the model.
@@ -443,7 +470,7 @@ app.post('/api/parts-check', guard('parts'), async (req, res) => {
   }
 
   // Single part (typed and/or photo)
-  const busyNote = e => String(e.message) === 'NO_KEY' ? (hi ? 'AI key नहीं है – Martigence रेफ़रेंस टेबल से अनुमान।' : 'AI key not set – estimate from the Martigence reference table.') : (hi ? 'Gemini अभी व्यस्त है – Martigence रेफ़रेंस टेबल और ऑनलाइन दाम से जवाब।' : 'Gemini is busy right now – answer from the Martigence reference table and live online prices.');
+  const busyNote = e => String(e.message) === 'NO_KEY' ? (hi ? 'AI key नहीं है – Martigence रेफ़रेंस टेबल से अनुमान।' : 'AI key not set – estimate from the Martigence reference table.') : (String(e.message) === 'DAILY_CAP' ? (hi ? 'आज की AI सीमा पूरी हो गई – Martigence रेफ़रेंस टेबल से अनुमान।' : 'Daily AI limit reached – estimate from the Martigence reference table.') : (hi ? 'Gemini अभी व्यस्त है – Martigence रेफ़रेंस टेबल और ऑनलाइन दाम से जवाब।' : 'Gemini is busy right now – answer from the Martigence reference table and live online prices.'));
   const textNoPrice = cleanText.replace(/(?:₹|rs\.?|rupees?|रु\.?|रुपये)\s*[0-9][0-9,]*|[0-9][0-9,]*\s*(?:₹|rs\.?|rupees?|रुपये|रु)\b/gi, ' ').replace(/\s+/g, ' ').trim();
   let idf = null;
   // Step 1 (photo only): a small, fast call that just names the part. Longer timeout, every model in the chain.
